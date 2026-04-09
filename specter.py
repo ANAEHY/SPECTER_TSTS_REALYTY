@@ -297,29 +297,25 @@ GENERATE_204_URLS = [
     'https://cp.cloudflare.com/generate_204',
 ]
 
-def check_xray(uri, timeout=8.0):
-    """
-    Multi-step проверка:
-    1. Быстрый фильтр (hostname / IP префикс)
-    2. xray запуск
-    3. 3x generate_204 — нужно минимум 2 успеха
-    4. Jitter > 150мс → отброс
-    5. Проверка реального IP (не балансер)
-    6. ASN проверка (не CDN)
-    7. Score = avg_latency + jitter*0.5
-       Reality даёт бонус -100 (лучший для РФ)
+"""
+ВРЕМЕННЫЙ ДЕБАГ — замени check_xray и check_all на эти версии
+После того как найдём проблему — уберём дебаг
+"""
 
-    Возвращает score (меньше = лучше) или 9999.
-    """
+def check_xray(uri, timeout=8.0):
+    p = urlparse(uri)
+    host = p.hostname or ''
 
     # Шаг 1: быстрый фильтр
     ok, ip_or_err = quick_filter(uri)
     if not ok:
+        print(f"      [SKIP] quick_filter: {host} → {ip_or_err}")
         return 9999
 
     # Шаг 2: парсим outbound
     outbound = parse_vless(uri)
     if not outbound:
+        print(f"      [SKIP] parse_vless fail: {host}")
         return 9999
 
     port = get_free_port()
@@ -357,32 +353,36 @@ def check_xray(uri, timeout=8.0):
                 ms = round((time.time() - t0) * 1000, 1)
                 if r.status_code == 204:
                     latencies.append(ms)
-            except Exception:
+            except Exception as e:
                 pass
 
-        # Минимум 2 успешных из 3
         if len(latencies) < 2:
+            print(f"      [SKIP] 204 fail ({len(latencies)}/3): {host}")
             return 9999
 
         avg_latency = statistics.mean(latencies)
         jitter = max(latencies) - min(latencies)
+        print(f"      [204 OK] {host} avg={avg_latency:.0f}ms jitter={jitter:.0f}ms")
 
         # Шаг 4: jitter
         if jitter > 150:
+            print(f"      [SKIP] jitter too high: {jitter:.0f}ms")
             return 9999
 
         # Шаг 5: реальный IP
         ip_ok, ip_info = check_real_ip(proxies, timeout=5.0)
         if not ip_ok:
+            print(f"      [SKIP] real IP fail: {ip_info}")
             return 9999
+        print(f"      [IP OK] {ip_info}")
 
         # Шаг 6: ASN
         asn_ok, org = check_asn(proxies, timeout=5.0)
         if not asn_ok:
+            print(f"      [SKIP] bad ASN: {org}")
             return 9999
+        print(f"      [ASN OK] {org}")
 
-        # Шаг 7: итоговый score
-        # Reality: -100 бонус (уже отфильтровано до этого, но на всякий)
         try:
             q = parse_qs(urlparse(uri).query)
             sec = q.get('security', ['none'])[0].lower()
@@ -391,9 +391,11 @@ def check_xray(uri, timeout=8.0):
             bonus = 0
 
         score = round(avg_latency + jitter * 0.5 + bonus, 1)
+        print(f"      [✅ PASS] score={score}")
         return score
 
-    except Exception:
+    except Exception as e:
+        print(f"      [ERROR] {host}: {e}")
         return 9999
     finally:
         if proc:
@@ -401,6 +403,34 @@ def check_xray(uri, timeout=8.0):
             except Exception: pass
         try: os.unlink(f.name)
         except Exception: pass
+
+
+def check_all(keys):
+    results = []
+
+    def worker(uri):
+        score = check_xray(uri, 8.0)
+        if score < 9999:
+            return uri, score
+        return None, 9999
+
+    # ДЕБАГ: только 5 потоков и первые 10 ключей чтобы читать лог
+    test_keys = keys[:10]
+    print(f"   [DEBUG] проверяем первые {len(test_keys)} ключей из {len(keys)}")
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        futures = {ex.submit(worker, k): k for k in test_keys}
+        done, alive = 0, 0
+        for future in as_completed(futures):
+            uri, score = future.result()
+            done += 1
+            if uri and score < 9999:
+                results.append((uri, score))
+                alive += 1
+
+    print(f"   [DEBUG] результат: {alive}/{len(test_keys)} живых")
+    results.sort(key=lambda x: x[1])
+    return results
 
 # =====================
 # CHECK ALL (УЛУЧШЕННЫЙ)
