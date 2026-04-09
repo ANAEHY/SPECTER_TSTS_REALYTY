@@ -243,134 +243,35 @@ def check_asn(proxies: dict, timeout: float = 5.0) -> tuple[bool, str]:
         return True, 'unknown'
 
 # =====================
-# XRAY CHECK
+# TCP CHECK (simple)
 # =====================
-def check_xray(uri: str, timeout: float = 8.0) -> float:
+def check_xray(uri: str, timeout: float = 3.0) -> float:
     """
-    Полная проверка одного ключа через xray:
-      1. quick_filter  — DNS/IP предфильтр
-      2. parse_vless   — строим конфиг
-      3. xray SOCKS5   — поднимаем локальный прокси
-      4. 204 x3        — параллельно, нужно >= 2
-      5. jitter <= 80ms
-      6. real IP       — два сервиса совпадают
-      7. ASN           — не CDN
-
-    Возвращает score (меньше = лучше) или 9999 при провале.
+    Простая TCP-проверка без xray:
+      1. quick_filter (DNS/IP preflight)
+      2. socket.create_connection -> измеряем RTT
+    Возвращает RTT в ms или 9999.
     """
     host = urlparse(uri).hostname or ''
+    port_str = urlparse(uri).port
 
-    # 1. Pre-filter
     ok, ip_or_err = quick_filter(uri)
     if not ok:
         print(f"      [SKIP] {host}: {ip_or_err}")
         return 9999
 
-    # 2. Parse
-    outbound = parse_vless(uri)
-    if not outbound:
-        print(f"      [SKIP] parse fail: {host}")
-        return 9999
+    port = int(port_str) if port_str else 443
 
-    port = get_free_port()
-    cfg  = {
-        'log':       {'loglevel': 'none'},
-        'inbounds':  [{'port': port, 'listen': '127.0.0.1',
-                       'protocol': 'socks',
-                       'settings': {'auth': 'noauth', 'udp': True}}],
-        'outbounds': [outbound, {'protocol': 'freedom', 'tag': 'direct'}],
-    }
-
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-    json.dump(cfg, tmp); tmp.close()
-
-    err_log = tempfile.NamedTemporaryFile(
-        mode='w', suffix='.err', delete=False, encoding='utf-8')
-    err_log.close()
-
-    proc = None
     try:
-        # 3. Start xray
-        proc = subprocess.Popen(
-            [XRAY_PATH, 'run', '-c', tmp.name],
-            stdout=subprocess.DEVNULL,
-            stderr=open(err_log.name, 'w', encoding='utf-8'),
-        )
-
-        # Wait for SOCKS port to open (up to 5s) instead of blind sleep
-        deadline = time.time() + 5.0
-        port_up  = False
-        while time.time() < deadline:
-            try:
-                with socket.create_connection(('127.0.0.1', port), timeout=0.2):
-                    port_up = True
-                    break
-            except OSError:
-                time.sleep(0.15)
-
-        if not port_up:
-            try:
-                xray_err = open(err_log.name, encoding='utf-8',
-                                errors='replace').read(400).strip()
-                if xray_err:
-                    print(f'      [XRAY ERR] {host}: {xray_err[:200]}')
-            except Exception:
-                pass
-            print(f'      [SKIP] port not up: {host}')
-            return 9999
-
-        proxies = {
-            'http':  f'socks5h://127.0.0.1:{port}',
-            'https': f'socks5h://127.0.0.1:{port}',
-        }
-
-        # 4. 204 параллельно
-        latencies = check_204_parallel(proxies, timeout=timeout)
-        if len(latencies) < 2:
-            print(f"      [SKIP] 204 fail ({len(latencies)}/3): {host}")
-            return 9999
-
-        avg    = statistics.mean(latencies)
-        jitter = max(latencies) - min(latencies)
-        print(f"      [204 OK] {host}  avg={avg:.0f}ms  jitter={jitter:.0f}ms")
-
-        # 5. Jitter
-        if jitter > 80:
-            print(f"      [SKIP] jitter {jitter:.0f}ms > 80ms")
-            return 9999
-
-        # 6. Реальный IP
-        ip_ok, ip_info = check_real_ip(proxies, timeout=5.0)
-        if not ip_ok:
-            print(f"      [SKIP] IP: {ip_info}")
-            return 9999
-        print(f"      [IP]  {ip_info}")
-
-        # 7. ASN
-        asn_ok, org = check_asn(proxies, timeout=5.0)
-        if not asn_ok:
-            print(f"      [SKIP] ASN: {org}")
-            return 9999
-        print(f"      [ASN] {org}")
-
-        score = round(avg + jitter * 0.5 - 100, 1)   # -100 бонус за REALITY
-        print(f"      [PASS] score={score}")
-        return score
-
+        t0 = time.time()
+        with socket.create_connection((host, port), timeout=timeout):
+            rtt = round((time.time() - t0) * 1000, 1)
+        print(f"      [TCP OK] {host}:{port}  rtt={rtt:.0f}ms")
+        # REALITY bonus
+        return round(rtt - 100, 1)
     except Exception as e:
-        print(f"      [ERR] {host}: {e}")
+        print(f"      [SKIP] TCP fail {host}:{port} — {e}")
         return 9999
-    finally:
-        if proc:
-            try: proc.kill(); proc.wait(timeout=2)
-            except Exception: pass
-        try: os.unlink(tmp.name)
-        except Exception: pass
-        try: os.unlink(err_log.name)
-        except Exception: pass
-        try: os.unlink(err_log.name)
-        except Exception: pass
-
 # =====================
 # PARALLEL CHECK
 # =====================
@@ -534,10 +435,7 @@ def main():
     print("  fp & sni - any value accepted")
     print("=" * 55)
 
-    xray_ok = install_xray()
-    print(f"\n[XRAY] {'OK' if xray_ok else 'FAIL'}")
-    if not xray_ok:
-        return
+    print()  # spacing
 
     all_keys = []
 
