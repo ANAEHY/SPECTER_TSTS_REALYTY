@@ -1,5 +1,12 @@
+# -*- coding: utf-8 -*-
+import sys, os
+
+# Windows CP1252 fix — must be before any print()
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 import requests
-import os
 import json
 import time
 import base64
@@ -354,7 +361,7 @@ def check_all(keys: list[str], workers: int = 10) -> list[tuple[str, float]]:
                 results.append((uri, score))
                 alive += 1
             if done % 10 == 0 or done == len(keys):
-                print(f"   [{done}/{len(keys)}] живых: {alive}", flush=True)
+                print(f"   [{done}/{len(keys)}] alive: {alive}", flush=True)
 
     results.sort(key=lambda x: x[1])
     return results
@@ -447,7 +454,7 @@ def dedup(keys: list[str]) -> list[str]:
 # =====================
 def save_github(content: str):
     if not GITHUB_TOKEN:
-        print("[SKIP] GH_TOKEN не задан")
+        print("[SKIP] GH_TOKEN not set")
         return
     url     = f'https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}'
     headers = {'Authorization': f'token {GITHUB_TOKEN}',
@@ -462,7 +469,7 @@ def save_github(content: str):
     if sha:
         data['sha'] = sha
     r = requests.put(url, headers=headers, json=data)
-    print('[OK] Сохранено в GitHub' if r.status_code in (200, 201)
+    print('[OK] Saved to GitHub' if r.status_code in (200, 201)
           else f'[ERROR] GitHub {r.status_code}: {r.text[:200]}')
 
 # =====================
@@ -491,10 +498,10 @@ def key_sort_order(key_str: str) -> tuple[int, int]:
 # =====================
 def main():
     print("=" * 55)
-    print("  SPECTER — REALITY + TCP + XRAY 204 CHECK")
+    print("  SPECTER - REALITY + TCP + XRAY 204 CHECK")
     print("=" * 55)
-    print("  Фильтр: security=reality, type=tcp, pbk=any")
-    print("  fp и sni — принимаем любые")
+    print("  Filter: security=reality, type=tcp, pbk=any")
+    print("  fp & sni - any value accepted")
     print("=" * 55)
 
     xray_ok = install_xray()
@@ -510,21 +517,21 @@ def main():
         print(f"[{name}]")
 
         raw   = dedup(load_keys(src['url']))
-        print(f"   загружено:       {len(raw)}")
+        print(f"   loaded:          {len(raw)}")
 
         valid = [k for k in raw if is_valid_key(k)]
         print(f"   reality+tcp:     {len(valid)}/{len(raw)}")
 
         if not valid:
-            print("   → пропуск (нет подходящих ключей)")
+            print("   -> skip (no valid keys)")
             continue
 
         checked = check_all(valid, workers=10)
-        print(f"   живых (204 OK):  {len(checked)}/{len(valid)}")
+        print(f"   alive (204 OK):  {len(checked)}/{len(valid)}")
 
         top = checked[:src['top_n']]
         if top:
-            print(f"   топ score:       {', '.join(str(s) for _, s in top)}")
+            print(f"   top score:       {chr(44).join(str(s) for _, s in top)}")
 
         for uri, _ in top:
             all_keys.append(rename_with_country(uri, src['lte']))
@@ -534,10 +541,10 @@ def main():
 
     wifi = sum(1 for k in all_keys if 'WiFi' in unquote(urlparse(k).fragment))
     lte  = sum(1 for k in all_keys if 'LTE'  in unquote(urlparse(k).fragment))
-    print(f"ИТОГО: {len(all_keys)} ключей  ({wifi} WiFi / {lte} LTE)")
+    print(f"TOTAL: {len(all_keys)} keys  ({wifi} WiFi / {lte} LTE)")
 
     if not all_keys:
-        print("[WARN] Живых ключей нет — GitHub не обновляем")
+        print("[WARN] No alive keys - GitHub not updated")
         return
 
     save_github(HEADER + '\n' + '\n'.join(all_keys))
