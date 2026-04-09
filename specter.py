@@ -284,14 +284,40 @@ def check_xray(uri: str, timeout: float = 8.0) -> float:
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
     json.dump(cfg, tmp); tmp.close()
 
+    err_log = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.err', delete=False, encoding='utf-8')
+    err_log.close()
+
     proc = None
     try:
-        # 3. Запуск xray
+        # 3. Start xray
         proc = subprocess.Popen(
             [XRAY_PATH, 'run', '-c', tmp.name],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=open(err_log.name, 'w', encoding='utf-8'),
         )
-        time.sleep(1.5)
+
+        # Wait for SOCKS port to open (up to 5s) instead of blind sleep
+        deadline = time.time() + 5.0
+        port_up  = False
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(('127.0.0.1', port), timeout=0.2):
+                    port_up = True
+                    break
+            except OSError:
+                time.sleep(0.15)
+
+        if not port_up:
+            try:
+                xray_err = open(err_log.name, encoding='utf-8',
+                                errors='replace').read(400).strip()
+                if xray_err:
+                    print(f'      [XRAY ERR] {host}: {xray_err[:200]}')
+            except Exception:
+                pass
+            print(f'      [SKIP] port not up: {host}')
+            return 9999
 
         proxies = {
             'http':  f'socks5h://127.0.0.1:{port}',
@@ -339,6 +365,10 @@ def check_xray(uri: str, timeout: float = 8.0) -> float:
             try: proc.kill(); proc.wait(timeout=2)
             except Exception: pass
         try: os.unlink(tmp.name)
+        except Exception: pass
+        try: os.unlink(err_log.name)
+        except Exception: pass
+        try: os.unlink(err_log.name)
         except Exception: pass
 
 # =====================
