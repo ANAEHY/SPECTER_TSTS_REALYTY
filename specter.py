@@ -26,30 +26,21 @@ HEADER = """#profile-title: base64:8J+RuyBTUEFDVEVSIFZQTg==
 # COUNTRY MAPS
 # =====================
 COUNTRY_RU = {
-    "🇩🇪": "Германия", "🇫🇷": "Франция",    "🇳🇱": "Нидерланды", "🇮🇹": "Италия",
-    "🇪🇸": "Испания",  "🇵🇱": "Польша",      "🇧🇪": "Бельгия",    "🇦🇹": "Австрия",
-    "🇨🇭": "Швейцария","🇸🇪": "Швеция",      "🇳🇴": "Норвегия",   "🇩🇰": "Дания",
-    "🇫🇮": "Финляндия","🇬🇧": "Британия",    "🇺🇸": "США",        "🇨🇦": "Канада",
-    "🇦🇺": "Австралия","🇯🇵": "Япония",       "🇰🇷": "Корея",      "🇸🇬": "Сингапур",
-    "🇷🇺": "Россия",   "🇺🇦": "Украина",      "🇹🇷": "Турция",     "🇮🇱": "Израиль",
-    "🇦🇪": "ОАЭ",      "🇮🇳": "Индия",        "🇧🇷": "Бразилия",   "🌐": "Anycast",
-}
-
-CODE_TO_FLAG = {
-    "DE": "🇩🇪", "FR": "🇫🇷", "NL": "🇳🇱", "IT": "🇮🇹", "ES": "🇪🇸",
-    "PL": "🇵🇱", "BE": "🇧🇪", "AT": "🇦🇹", "CH": "🇨🇭", "SE": "🇸🇪",
-    "NO": "🇳🇴", "DK": "🇩🇰", "FI": "🇫🇮", "GB": "🇬🇧", "US": "🇺🇸",
-    "CA": "🇨🇦", "AU": "🇦🇺", "JP": "🇯🇵", "KR": "🇰🇷", "SG": "🇸🇬",
-    "RU": "🇷🇺", "UA": "🇺🇦", "TR": "🇹🇷", "IL": "🇮🇱", "AE": "🇦🇪",
-    "IN": "🇮🇳", "BR": "🇧🇷",
+    "🇩🇪": "Германия",  "🇫🇷": "Франция",    "🇳🇱": "Нидерланды", "🇮🇹": "Италия",
+    "🇪🇸": "Испания",   "🇵🇱": "Польша",      "🇧🇪": "Бельгия",    "🇦🇹": "Австрия",
+    "🇨🇭": "Швейцария", "🇸🇪": "Швеция",      "🇳🇴": "Норвегия",   "🇩🇰": "Дания",
+    "🇫🇮": "Финляндия", "🇬🇧": "Британия",    "🇺🇸": "США",        "🇨🇦": "Канада",
+    "🇦🇺": "Австралия", "🇯🇵": "Япония",       "🇰🇷": "Корея",      "🇸🇬": "Сингапур",
+    "🇷🇺": "Россия",    "🇺🇦": "Украина",      "🇹🇷": "Турция",     "🇮🇱": "Израиль",
+    "🇦🇪": "ОАЭ",       "🇮🇳": "Индия",        "🇧🇷": "Бразилия",   "🌐": "Anycast",
 }
 
 # =====================
-# XRAY BINARY
+# XRAY
 # =====================
 XRAY_PATH = 'xray.exe' if os.name == 'nt' else '/tmp/xray'
 
-def install_xray():
+def install_xray() -> bool:
     if os.path.exists(XRAY_PATH):
         return True
     try:
@@ -59,7 +50,7 @@ def install_xray():
             with open('xray.zip', 'wb') as f:
                 for c in r.iter_content(8192): f.write(c)
             import zipfile
-            with zipfile.ZipFile('xray.zip', 'r') as z: z.extractall('.')
+            with zipfile.ZipFile('xray.zip') as z: z.extractall('.')
             os.remove('xray.zip')
         else:
             r   = requests.get('https://api.github.com/repos/XTLS/Xray-core/releases/latest', timeout=15)
@@ -69,7 +60,7 @@ def install_xray():
             with open('/tmp/xray.zip', 'wb') as f:
                 for c in r.iter_content(8192): f.write(c)
             import zipfile
-            with zipfile.ZipFile('/tmp/xray.zip', 'r') as z: z.extract('xray', '/tmp/')
+            with zipfile.ZipFile('/tmp/xray.zip') as z: z.extract('xray', '/tmp/')
             os.chmod(XRAY_PATH, 0o755)
             os.remove('/tmp/xray.zip')
         return True
@@ -77,18 +68,34 @@ def install_xray():
         print(f"[XRAY install error] {e}")
         return False
 
-# =====================
-# PRE-FILTER CONSTANTS
-# =====================
+# ─────────────────────────────────────────────
+#  ГЛАВНЫЙ ФИЛЬТР
+#  Критерии братишка:
+#    ✓ протокол = vless
+#    ✓ security = reality
+#    ✓ type     = tcp
+#    ✓ pbk      = есть (публичный ключ)
+#    — fp, sni  = не важны, принимаем любые
+# ─────────────────────────────────────────────
+def is_valid_key(uri: str) -> bool:
+    try:
+        p = urlparse(uri)
+        if p.scheme != 'vless':
+            return False
+        q   = parse_qs(p.query)
+        sec = q.get('security', [''])[0].lower()
+        net = q.get('type',     ['tcp'])[0].lower()  # если type не указан — TCP по умолчанию
+        pbk = q.get('pbk',      [''])[0].strip()
+        return sec == 'reality' and net == 'tcp' and len(pbk) > 0
+    except Exception:
+        return False
 
-# CDN IP-префиксы — мгновенный skip
-BAD_IP_PREFIXES = ('104.', '172.6', '172.7', '188.114.', '162.158.', '198.41.')
-
-# Мусорные hostname паттерны
+# =====================
+# PRE-FILTER
+# =====================
+BAD_IP_PREFIXES   = ('104.', '172.6', '172.7', '188.114.', '162.158.', '198.41.')
 BAD_HOST_PATTERNS = ('workers.dev', 'pages.dev', 'cloudflare', 'fastly.net')
-
-# Плохие CDN-провайдеры (убраны amazon/google — легитимные REALITY иногда на AWS/GCP)
-BAD_ASN_ORGS = ('cloudflare', 'fastly', 'akamai', 'incapsula', 'imperva')
+BAD_ASN_ORGS      = ('cloudflare', 'fastly', 'akamai', 'incapsula', 'imperva')
 
 GENERATE_204_URLS = [
     'https://www.gstatic.com/generate_204',
@@ -96,90 +103,46 @@ GENERATE_204_URLS = [
     'https://cp.cloudflare.com/generate_204',
 ]
 
-# =====================
-# REALITY FILTER
-# =====================
-def is_reality(uri: str) -> bool:
-    """Принимаем только VLESS + REALITY — лучший протокол для РФ."""
-    try:
-        p   = urlparse(uri)
-        if p.scheme != 'vless':
-            return False
-        q   = parse_qs(p.query)
-        sec = q.get('security', ['none'])[0].lower()
-        pbk = q.get('pbk', [''])[0].strip()
-        # Обязательно: security=reality и публичный ключ
-        return sec == 'reality' and len(pbk) > 0
-    except Exception:
-        return False
-
-# =====================
-# QUICK PRE-CHECK
-# =====================
 def quick_filter(uri: str) -> tuple[bool, str]:
-    """DNS + IP/host фильтр до запуска xray."""
+    """DNS + IP до запуска xray — быстрый отсев."""
     try:
-        p    = urlparse(uri)
-        host = (p.hostname or '').lower()
-
+        host = (urlparse(uri).hostname or '').lower()
         if not host:
             return False, 'empty host'
-
         for pat in BAD_HOST_PATTERNS:
             if pat in host:
                 return False, f'bad host: {pat}'
-
         try:
             ip = socket.gethostbyname(host)
         except socket.gaierror:
             return False, 'DNS fail'
-
         for prefix in BAD_IP_PREFIXES:
             if ip.startswith(prefix):
                 return False, f'CF IP: {prefix}'
-
         return True, ip
     except Exception as e:
         return False, str(e)
 
 # =====================
-# VLESS PARSING
+# VLESS → XRAY CONFIG
 # =====================
-def parse_vless(uri):
+def parse_vless(uri: str) -> dict | None:
+    """
+    Строим outbound для xray.
+    Для REALITY+TCP выставляем явный tcpSettings.
+    fp и sni берём как есть — не фильтруем.
+    """
     try:
         p    = urlparse(uri)
         q    = parse_qs(p.query)
         h    = p.hostname
         pt   = p.port or 443
         u    = p.username
-        sec  = q.get('security',    ['none'])[0]
-        net  = q.get('type',        ['tcp'])[0]
-        flow = q.get('flow',        [''])[0]
-        sni  = q.get('sni',         [h])[0]
-        fp   = q.get('fp',          ['chrome'])[0]
-        pbk  = q.get('pbk',         [''])[0]
-        sid  = q.get('sid',         [''])[0]
-        path = q.get('path',        ['/'])[0]
-        svc  = q.get('serviceName', [''])[0]
-
-        stream = {'network': net}
-
-        if sec == 'reality':
-            stream['security'] = 'reality'
-            stream['realitySettings'] = {
-                'serverName': sni, 'fingerprint': fp,
-                'publicKey': pbk,  'shortId': sid,
-            }
-        elif sec == 'tls':
-            stream['security'] = 'tls'
-            stream['tlsSettings'] = {'serverName': sni, 'allowInsecure': True}
-
-        if net == 'ws':
-            stream['wsSettings']   = {'path': path}
-        elif net == 'grpc':
-            stream['grpcSettings'] = {'serviceName': svc, 'multiMode': False}
-        elif net == 'tcp':
-            stream['tcpSettings']  = {}   # явный TCP для REALITY
+        flow = q.get('flow', [''])[0]
+        sni  = q.get('sni',  [h])[0]
+        fp   = q.get('fp',   ['chrome'])[0]   # любой fingerprint
+        pbk  = q.get('pbk',  [''])[0]
+        sid  = q.get('sid',  [''])[0]
 
         return {
             'protocol': 'vless',
@@ -190,21 +153,58 @@ def parse_vless(uri):
                     'users':   [{'id': u, 'encryption': 'none', 'flow': flow}],
                 }]
             },
-            'streamSettings': stream,
+            'streamSettings': {
+                'network':  'tcp',
+                'security': 'reality',
+                'realitySettings': {
+                    'serverName':  sni,
+                    'fingerprint': fp,
+                    'publicKey':   pbk,
+                    'shortId':     sid,
+                },
+                'tcpSettings': {},
+            },
         }
     except Exception:
         return None
 
-def get_free_port():
+def get_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('127.0.0.1', 0))
         return s.getsockname()[1]
 
 # =====================
-# IP / ASN CHECKS
+# ПАРАЛЛЕЛЬНЫЙ 204
+# =====================
+def check_204_parallel(proxies: dict, timeout: float = 4.0) -> list[float]:
+    """
+    Шлём GET к 3 generate_204 URL одновременно.
+    Нужно >= 2 ответов HTTP 204 — тогда ключ живой.
+    """
+    latencies = []
+
+    def fetch_one(url: str) -> float | None:
+        try:
+            t0 = time.time()
+            r  = requests.get(url, proxies=proxies, timeout=timeout, allow_redirects=False)
+            ms = round((time.time() - t0) * 1000, 1)
+            return ms if r.status_code == 204 else None
+        except Exception:
+            return None
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        for f in as_completed([ex.submit(fetch_one, u) for u in GENERATE_204_URLS]):
+            r = f.result()
+            if r is not None:
+                latencies.append(r)
+
+    return latencies
+
+# =====================
+# IP / ASN
 # =====================
 def check_real_ip(proxies: dict, timeout: float = 5.0) -> tuple[bool, str]:
-    """Два сервиса должны вернуть одинаковый IP — иначе CDN/балансер."""
+    """Два независимых сервиса должны вернуть один IP."""
     ips = []
     for url in ['https://api.ipify.org', 'https://ifconfig.me/ip']:
         try:
@@ -214,21 +214,17 @@ def check_real_ip(proxies: dict, timeout: float = 5.0) -> tuple[bool, str]:
                 ips.append(ip)
         except Exception:
             continue
-
     if len(ips) < 2:
         return True, ips[0] if ips else 'unknown'
-
     if ips[0] != ips[1]:
         return False, f'balancer: {ips[0]} != {ips[1]}'
-
     for prefix in BAD_IP_PREFIXES:
         if ips[0].startswith(prefix):
             return False, f'CF IP: {ips[0]}'
-
     return True, ips[0]
 
 def check_asn(proxies: dict, timeout: float = 5.0) -> tuple[bool, str]:
-    """CDN-ASN → reject."""
+    """CDN ASN → reject."""
     try:
         r   = requests.get('https://ipinfo.io/json', proxies=proxies, timeout=timeout)
         org = r.json().get('org', '').lower()
@@ -240,61 +236,30 @@ def check_asn(proxies: dict, timeout: float = 5.0) -> tuple[bool, str]:
         return True, 'unknown'
 
 # =====================
-# PARALLEL 204 CHECK
-# =====================
-def check_204_parallel(proxies: dict, timeout: float = 4.0) -> list[float]:
-    """
-    Параллельный запрос к 3 generate_204 URL.
-    Возвращает список успешных латентностей.
-    Быстрее последовательного в ~3 раза.
-    """
-    latencies = []
-
-    def fetch_one(url):
-        try:
-            t0 = time.time()
-            r  = requests.get(url, proxies=proxies, timeout=timeout, allow_redirects=False)
-            ms = round((time.time() - t0) * 1000, 1)
-            return ms if r.status_code == 204 else None
-        except Exception:
-            return None
-
-    with ThreadPoolExecutor(max_workers=3) as ex:
-        futures = [ex.submit(fetch_one, url) for url in GENERATE_204_URLS]
-        for f in as_completed(futures):
-            result = f.result()
-            if result is not None:
-                latencies.append(result)
-
-    return latencies
-
-# =====================
-# XRAY CHECK (CORE)
+# XRAY CHECK
 # =====================
 def check_xray(uri: str, timeout: float = 8.0) -> float:
     """
-    Полная проверка одного REALITY-ключа:
-      1. quick_filter  — DNS + IP/host
-      2. parse_vless   — валидность конфига
-      3. xray запуск   — SOCKS5 локальный прокси
-      4. 204 x3        — параллельно, нужно >= 2 успехов
+    Полная проверка одного ключа через xray:
+      1. quick_filter  — DNS/IP предфильтр
+      2. parse_vless   — строим конфиг
+      3. xray SOCKS5   — поднимаем локальный прокси
+      4. 204 x3        — параллельно, нужно >= 2
       5. jitter <= 80ms
-      6. real IP check — два сервиса совпадают
-      7. ASN check     — не CDN
+      6. real IP       — два сервиса совпадают
+      7. ASN           — не CDN
 
     Возвращает score (меньше = лучше) или 9999 при провале.
-    REALITY даёт бонус -100 к score.
     """
-    p    = urlparse(uri)
-    host = p.hostname or ''
+    host = urlparse(uri).hostname or ''
 
-    # --- 1. quick filter ---
+    # 1. Pre-filter
     ok, ip_or_err = quick_filter(uri)
     if not ok:
-        print(f"      [SKIP] quick: {host} → {ip_or_err}")
+        print(f"      [SKIP] {host}: {ip_or_err}")
         return 9999
 
-    # --- 2. parse ---
+    # 2. Parse
     outbound = parse_vless(uri)
     if not outbound:
         print(f"      [SKIP] parse fail: {host}")
@@ -310,65 +275,58 @@ def check_xray(uri: str, timeout: float = 8.0) -> float:
     }
 
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
-    json.dump(cfg, tmp)
-    tmp.close()
+    json.dump(cfg, tmp); tmp.close()
 
     proc = None
     try:
-        # --- 3. запуск xray ---
+        # 3. Запуск xray
         proc = subprocess.Popen(
             [XRAY_PATH, 'run', '-c', tmp.name],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        time.sleep(1.5)   # даём xray подняться
+        time.sleep(1.5)
 
         proxies = {
             'http':  f'socks5h://127.0.0.1:{port}',
             'https': f'socks5h://127.0.0.1:{port}',
         }
 
-        # --- 4. параллельные 204 ---
+        # 4. 204 параллельно
         latencies = check_204_parallel(proxies, timeout=timeout)
-
         if len(latencies) < 2:
             print(f"      [SKIP] 204 fail ({len(latencies)}/3): {host}")
             return 9999
 
         avg    = statistics.mean(latencies)
         jitter = max(latencies) - min(latencies)
-        print(f"      [204 OK] {host} avg={avg:.0f}ms jitter={jitter:.0f}ms")
+        print(f"      [204 OK] {host}  avg={avg:.0f}ms  jitter={jitter:.0f}ms")
 
-        # --- 5. jitter ---
+        # 5. Jitter
         if jitter > 80:
             print(f"      [SKIP] jitter {jitter:.0f}ms > 80ms")
             return 9999
 
-        # --- 6. реальный IP ---
+        # 6. Реальный IP
         ip_ok, ip_info = check_real_ip(proxies, timeout=5.0)
         if not ip_ok:
             print(f"      [SKIP] IP: {ip_info}")
             return 9999
-        print(f"      [IP] {ip_info}")
+        print(f"      [IP]  {ip_info}")
 
-        # --- 7. ASN ---
+        # 7. ASN
         asn_ok, org = check_asn(proxies, timeout=5.0)
         if not asn_ok:
             print(f"      [SKIP] ASN: {org}")
             return 9999
         print(f"      [ASN] {org}")
 
-        # REALITY бонус -100 (всегда True здесь, но на всякий случай)
-        q     = parse_qs(p.query)
-        bonus = -100 if q.get('security', [''])[0].lower() == 'reality' else 0
-        score = round(avg + jitter * 0.5 + bonus, 1)
+        score = round(avg + jitter * 0.5 - 100, 1)   # -100 бонус за REALITY
         print(f"      [PASS] score={score}")
         return score
 
     except Exception as e:
         print(f"      [ERR] {host}: {e}")
         return 9999
-
     finally:
         if proc:
             try: proc.kill(); proc.wait(timeout=2)
@@ -380,10 +338,6 @@ def check_xray(uri: str, timeout: float = 8.0) -> float:
 # PARALLEL CHECK
 # =====================
 def check_all(keys: list[str], workers: int = 10) -> list[tuple[str, float]]:
-    """
-    Параллельная проверка всех ключей.
-    Возвращает [(uri, score)] отсортированный по score (меньше = лучше).
-    """
     results = []
 
     def worker(uri):
@@ -393,7 +347,6 @@ def check_all(keys: list[str], workers: int = 10) -> list[tuple[str, float]]:
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futures = {ex.submit(worker, k): k for k in keys}
         done = alive = 0
-
         for future in as_completed(futures):
             uri, score = future.result()
             done += 1
@@ -410,72 +363,64 @@ def check_all(keys: list[str], workers: int = 10) -> list[tuple[str, float]]:
 # COUNTRY DETECTION
 # =====================
 def get_flag_and_country(fragment: str) -> tuple[str, str]:
-    decoded     = unquote(fragment)
-    flag_match  = re.search(r'([\U0001F1E0-\U0001F1FF]{2})', decoded)
-    if flag_match:
-        flag = flag_match.group(1)
-        if flag in COUNTRY_RU:
-            return flag, COUNTRY_RU[flag]
+    decoded = unquote(fragment)
+    m       = re.search(r'([\U0001F1E0-\U0001F1FF]{2})', decoded)
+    if m and m.group(1) in COUNTRY_RU:
+        return m.group(1), COUNTRY_RU[m.group(1)]
     return "🌐", "Anycast"
 
 def extract_country(config: str) -> str:
     patterns = {
-        'DE': ['de-','germany','berlin','frankfurt','🇩🇪'],
-        'FR': ['fr-','france','paris','🇫🇷'],
-        'NL': ['nl-','netherlands','amsterdam','rotterdam','🇳🇱'],
-        'IT': ['it-','italy','rome','milan','🇮🇹'],
-        'ES': ['es-','spain','madrid','🇪🇸'],
-        'PL': ['pl-','poland','warsaw','🇵🇱'],
-        'GB': ['gb-','uk','london','britain','england','🇬🇧'],
-        'US': ['us-','usa','new york','nyc','🇺🇸'],
-        'CA': ['ca-','canada','toronto','🇨🇦'],
-        'JP': ['jp-','japan','tokyo','🇯🇵'],
-        'RU': ['ru-','russia','moscow','spb','🇷🇺'],
+        'DE': ['de-','germany','berlin','frankfurt'],
+        'FR': ['fr-','france','paris'],
+        'NL': ['nl-','netherlands','amsterdam','rotterdam'],
+        'IT': ['it-','italy','rome','milan'],
+        'ES': ['es-','spain','madrid'],
+        'PL': ['pl-','poland','warsaw'],
+        'GB': ['gb-','uk','london','britain','england'],
+        'US': ['us-','usa','new york','nyc'],
+        'CA': ['ca-','canada','toronto'],
+        'JP': ['jp-','japan','tokyo'],
+        'RU': ['ru-','russia','moscow','spb'],
     }
-    config_lower = config.lower()
+    cfg = config.lower()
     for country, pats in patterns.items():
-        if any(pat in config_lower for pat in pats):
+        if any(p in cfg for p in pats):
             return country
     return 'OTHER'
 
 def get_country_from_url(uri: str) -> tuple[str, str]:
-    p             = urlparse(uri)
-    flag, country = get_flag_and_country(p.fragment)
+    flag, country = get_flag_and_country(urlparse(uri).fragment)
     if country != "Anycast":
         return flag, country
-
-    code_to_info = {
-        'DE': ('🇩🇪','Германия'),  'NL': ('🇳🇱','Нидерланды'),
-        'FR': ('🇫🇷','Франция'),   'IT': ('🇮🇹','Италия'),
-        'ES': ('🇪🇸','Испания'),   'PL': ('🇵🇱','Польша'),
-        'GB': ('🇬🇧','Британия'),  'US': ('🇺🇸','США'),
-        'CA': ('🇨🇦','Канада'),    'AU': ('🇦🇺','Австралия'),
-        'JP': ('🇯🇵','Япония'),    'KR': ('🇰🇷','Корея'),
-        'RU': ('🇷🇺','Россия'),
+    code_map = {
+        'DE':('🇩🇪','Германия'),  'NL':('🇳🇱','Нидерланды'),
+        'FR':('🇫🇷','Франция'),   'IT':('🇮🇹','Италия'),
+        'ES':('🇪🇸','Испания'),   'PL':('🇵🇱','Польша'),
+        'GB':('🇬🇧','Британия'),  'US':('🇺🇸','США'),
+        'CA':('🇨🇦','Канада'),    'AU':('🇦🇺','Австралия'),
+        'JP':('🇯🇵','Япония'),    'KR':('🇰🇷','Корея'),
+        'RU':('🇷🇺','Россия'),
     }
-    code = extract_country(uri)
-    return code_to_info.get(code, ("🌐", "Anycast"))
+    return code_map.get(extract_country(uri), ("🌐", "Anycast"))
 
-# =====================
-# RENAME
-# =====================
 def rename_with_country(uri: str, lte: bool) -> str:
     p             = urlparse(uri)
     flag, country = get_country_from_url(uri)
     tag           = "LTE" if lte else "WiFi"
-    new_name      = f"{flag} {country} - {tag}"
-    return urlunparse((p.scheme, p.netloc, p.path, p.params, p.query, quote(new_name)))
+    return urlunparse((p.scheme, p.netloc, p.path, p.params,
+                       p.query, quote(f"{flag} {country} - {tag}")))
 
 # =====================
 # SOURCES
 # =====================
 IGARECK_SOURCES = [
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt',              'lte': False, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt',                     'lte': False, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt', 'lte': True,  'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt','lte': True, 'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-CIDR-RU-checked.txt',               'lte': True,  'top_n': 8},
-    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-SNI-RU-all.txt',                    'lte': True,  'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt',               'lte': False, 'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt',                      'lte': False, 'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt',  'lte': True,  'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile-2.txt','lte': True,  'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-CIDR-RU-checked.txt',                'lte': True,  'top_n': 8},
+    {'url': 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/WHITE-SNI-RU-all.txt',                     'lte': True,  'top_n': 8},
 ]
 
 def load_keys(url: str) -> list[str]:
@@ -486,15 +431,13 @@ def load_keys(url: str) -> list[str]:
         return []
 
 def dedup(keys: list[str]) -> list[str]:
-    """Дедупликация по host:port."""
     seen, out = set(), []
     for k in keys:
         try:
             p   = urlparse(k)
             key = f"{p.hostname}:{p.port}"
             if key not in seen:
-                seen.add(key)
-                out.append(k)
+                seen.add(key); out.append(k)
         except Exception:
             out.append(k)
     return out
@@ -503,43 +446,38 @@ def dedup(keys: list[str]) -> list[str]:
 # GITHUB SAVE
 # =====================
 def save_github(content: str):
+    if not GITHUB_TOKEN:
+        print("[SKIP] GH_TOKEN не задан")
+        return
     url     = f'https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE}'
-    headers = {
-        'Authorization': f'token {GITHUB_TOKEN}',
-        'Accept':        'application/vnd.github.v3+json',
-    }
+    headers = {'Authorization': f'token {GITHUB_TOKEN}',
+               'Accept': 'application/vnd.github.v3+json'}
     sha = None
     r   = requests.get(url, headers=headers)
     if r.status_code == 200:
         sha = r.json().get('sha')
-
-    data = {
-        'message': 'Auto update REALITY keys',
-        'content': base64.b64encode(content.encode()).decode(),
-        'branch':  GITHUB_BRANCH,
-    }
+    data = {'message': 'Auto update REALITY+TCP',
+            'content': base64.b64encode(content.encode()).decode(),
+            'branch':  GITHUB_BRANCH}
     if sha:
         data['sha'] = sha
-
     r = requests.put(url, headers=headers, json=data)
-    if r.status_code in (200, 201):
-        print('\n[OK] Сохранено в GitHub')
-    else:
-        print(f'\n[ERROR] GitHub: {r.status_code} — {r.text[:200]}')
+    print('[OK] Сохранено в GitHub' if r.status_code in (200, 201)
+          else f'[ERROR] GitHub {r.status_code}: {r.text[:200]}')
 
 # =====================
-# COUNTRY SORT ORDER
+# SORT
 # =====================
 COUNTRY_ORDER = {
-    'Германия':   1, 'Нидерланды': 2, 'Франция':   3,  'Италия':   4,
-    'Испания':    5, 'Польша':     6, 'Британия':  7,  'США':      8,
-    'Канада':     9, 'Австралия':  10, 'Япония':    11, 'Корея':    12,
-    'Россия':     13, 'Anycast':   999,
+    'Германия':1, 'Нидерланды':2, 'Франция':3,  'Италия':4,
+    'Испания':5,  'Польша':6,     'Британия':7, 'США':8,
+    'Канада':9,   'Австралия':10, 'Япония':11,  'Корея':12,
+    'Россия':13,  'Anycast':999,
 }
 
 def key_sort_order(key_str: str) -> tuple[int, int]:
     try:
-        fragment = unquote(urlparse(key_str).fragment)
+        fragment   = unquote(urlparse(key_str).fragment)
         wifi_first = 0 if 'WiFi' in fragment else 1
         for country, order in COUNTRY_ORDER.items():
             if country.lower() in fragment.lower():
@@ -553,15 +491,14 @@ def key_sort_order(key_str: str) -> tuple[int, int]:
 # =====================
 def main():
     print("=" * 55)
-    print("  SPECTER — REALITY ONLY + XRAY 204 CHECK")
+    print("  SPECTER — REALITY + TCP + XRAY 204 CHECK")
+    print("=" * 55)
+    print("  Фильтр: security=reality, type=tcp, pbk=any")
+    print("  fp и sni — принимаем любые")
     print("=" * 55)
 
-    if not GITHUB_TOKEN:
-        print("[WARN] GH_TOKEN не задан — GitHub сохранение отключено")
-
     xray_ok = install_xray()
-    print(f"[XRAY] {'OK' if xray_ok else 'FAIL — проверки отключены'}\n")
-
+    print(f"\n[XRAY] {'OK' if xray_ok else 'FAIL'}")
     if not xray_ok:
         return
 
@@ -569,46 +506,41 @@ def main():
 
     for src in IGARECK_SOURCES:
         name = src['url'].split('/')[-1]
-        print(f"\n{'─'*50}")
+        print(f"\n{'─'*55}")
         print(f"[{name}]")
 
-        raw = dedup(load_keys(src['url']))
-        print(f"   загружено:  {len(raw)}")
+        raw   = dedup(load_keys(src['url']))
+        print(f"   загружено:       {len(raw)}")
 
-        reality_keys = [k for k in raw if is_reality(k)]
-        print(f"   reality:    {len(reality_keys)}/{len(raw)}")
+        valid = [k for k in raw if is_valid_key(k)]
+        print(f"   reality+tcp:     {len(valid)}/{len(raw)}")
 
-        if not reality_keys:
-            print("   → пропуск (нет reality ключей)")
+        if not valid:
+            print("   → пропуск (нет подходящих ключей)")
             continue
 
-        checked = check_all(reality_keys, workers=10)
-        print(f"   живых:      {len(checked)}/{len(reality_keys)}")
+        checked = check_all(valid, workers=10)
+        print(f"   живых (204 OK):  {len(checked)}/{len(valid)}")
 
         top = checked[:src['top_n']]
         if top:
-            scores_str = ', '.join(str(s) for _, s in top)
-            print(f"   топ score:  {scores_str}")
+            print(f"   топ score:       {', '.join(str(s) for _, s in top)}")
 
         for uri, _ in top:
             all_keys.append(rename_with_country(uri, src['lte']))
 
     print(f"\n{'='*55}")
-
-    # Сортировка: WiFi раньше LTE, внутри — по стране
     all_keys.sort(key=key_sort_order)
 
     wifi = sum(1 for k in all_keys if 'WiFi' in unquote(urlparse(k).fragment))
     lte  = sum(1 for k in all_keys if 'LTE'  in unquote(urlparse(k).fragment))
-    print(f"ИТОГО: {len(all_keys)} ключей ({wifi} WiFi / {lte} LTE)")
-    print("Все ключи — REALITY, проверены xray+204\n")
+    print(f"ИТОГО: {len(all_keys)} ключей  ({wifi} WiFi / {lte} LTE)")
 
     if not all_keys:
-        print("[WARN] Живых ключей нет — GitHub не обновляется")
+        print("[WARN] Живых ключей нет — GitHub не обновляем")
         return
 
-    content = HEADER + '\n' + '\n'.join(all_keys)
-    save_github(content)
+    save_github(HEADER + '\n' + '\n'.join(all_keys))
 
 if __name__ == '__main__':
     main()
